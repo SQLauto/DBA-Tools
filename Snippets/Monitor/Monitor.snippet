@@ -1,0 +1,307 @@
+<CodeSnippets  xmlns="http://schemas.microsoft.com/VisualStudio/2005/CodeSnippet">
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>Auto Growth Count</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+DECLARE @path nvarchar(260) = (
+    SELECT REVERSE(SUBSTRING(REVERSE(path), CHARINDEX('\', REVERSE(path)), 260)) +'log.trc'
+    FROM    sys.traces
+    WHERE   is_default = 1)
+
+SELECT DB_NAME(gt.DatabaseID) AS Db_Name,
+       gt.FileName,
+       COUNT(*) AS NumberOfEvents,
+       CASE WHEN te.name LIKE'%Grow' THEN 1 ELSE 0 END AS is_growth_event
+FROM  sys.fn_trace_gettable(@path, DEFAULT) gt
+JOIN sys.trace_events te ON gt.EventClass = te.trace_event_id
+WHERE   te.name in ('Data File Auto Grow','Log File Auto Grow','Data File Auto Shrink','Log File Auto Shrink')
+GROUP BY gt.DatabaseID,
+       gt.FileName,
+       te.name
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>Exec Resources Stats</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+DECLARE @DateStart DATETIME2(3) = GETDATE();
+SET STATISTICS IO ON;
+SET STATISTICS TIME ON;
+$selected$$end$
+SET STATISTICS TIME OFF;
+SET STATISTICS IO OFF;
+SELECT DATEDIFF(ms, @DateStart, GETDATE()) AS duration_ms
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>Jobs-steps-graph</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+DECLARE @job_name sysname = '%'
+DECLARE @Only_outcomes BIT = 0
+DECLARE @Mindate DATETIME2(0) = DATEADD(hour, -72, GETDATE()) 
+DECLARE @Agregatemin INT = 10
+ 
+--Get all history for the chosen job
+IF OBJECT_ID('tempdb..#Job_History') IS NOT NULL DROP TABLE #Job_History; 
+CREATE TABLE #Job_History(
+Step_Name		nvarchar(229)	NOT NULL
+,Run_Time		datetime2(0)	NOT NULL
+,run_duration	int	NULL
+)
+ALTER TABLE dbo.#Job_History ADD PRIMARY KEY (Step_Name, run_time)
+
+--Create a Table to be Visualized
+INSERT INTO #Job_History
+SELECT	h.job_name+' Step' + STR( h.step_id, 3 ) + CASE WHEN h.run_status = 1 THEN ' -OK- ' ELSE ' -KO- ' END+ LEFT( h.step_name, 80 ) AS Step_Name
+		,dateadd(mi, datediff(mi,0, Date_Start) / @Agregatemin * @Agregatemin, 0) as Run_Time
+		,SUM(h.run_duration) AS run_duration
+FROM DBA.dbo.GetJobHistory(@job_name,@Mindate) AS h
+WHERE	h.step_id <= CASE @Only_outcomes WHEN 1 THEN 0 ELSE 99 END 
+AND		h.step_id >= CASE @Only_outcomes WHEN 0 THEN 1 ELSE 0 END
+GROUP BY h.step_name, h.job_name, h.step_id , dateadd(mi, datediff(mi,0, Date_Start) / @Agregatemin * @Agregatemin, 0),h.run_status 
+ 
+EXEC DBA.dbo.graph_fromtable '#Job_History', 'run_time', 'sqrt(run_duration)', @Group_Column = 'Step_Name', @Restrictions = '', @debug = 0
+EXEC DBA.dbo.graph_fromtable '#Job_History', 'run_time', 'sqrt(run_duration)', @Group_Column = 'Step_Name', @Restrictions = 'Step_Name LIKE ''%-KO-%''', @debug = 0
+
+-- select * from #Job_History
+
+
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>MonitorLocal Session XE</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+DECLARE @Monitor_only_current BIT = 0
+	,@AutoDeactivation VARCHAR(500) = 'DATEADD(mi, 30, GETDATE())'
+	,@client_pid INT	
+	,@SessionName sysname
+
+SELECT TOP 1 @client_pid = host_process_id
+	,@SessionName = 'temp_'+REPLACE(nt_user_name, '.', '')
+FROM sys.dm_exec_sessions WHERE session_id = @@spid
+
+DECLARE @SessionFilter varchar(500) = 'sqlserver.client_pid='+CAST(@client_pid AS SYSNAME)+ CASE WHEN @Monitor_only_current = 1 THEN ' AND sqlserver.session_id='+CAST(@@spid AS SYSNAME) ELSE '' END
++' AND cpu_time!=0 '
+
+EXEC DBA.dbo.XE_ConfigureSession @SessionName ,@ConfType='Event_Type'	,@Value='sqlserver.sql_statement_completed'			  ,@Action = 'Replace'
+EXEC DBA.dbo.XE_ConfigureSession @SessionName ,@ConfType='Global_Fields' ,@Value='sqlserver.client_pid,sqlserver.session_id,database_name'  ,@Action = 'Add'
+EXEC DBA.dbo.XE_ConfigureSession @SessionName ,@ConfType='Filter'		,@Value=@SessionFilter								  ,@Action = 'Replace'
+EXEC DBA.dbo.XE_ConfigureSession @SessionName ,@ConfType='ExpiryDate'	,@Value=@AutoDeactivation
+EXEC DBA.dbo.XE_ConfigureSession @SessionName ,@ConfType='MaxDispatchLatency'		,@Value=1								  ,@Action = 'Replace'
+EXEC DBA.dbo.XE_RefreshSession @SessionName
+
+GO
+RETURN
+--Force early drop session
+/*
+DECLARE @SessionName sysname = (SELECT 'temp_'+REPLACE(nt_user_name, '.', '')
+FROM sys.dm_exec_sessions WHERE session_id = @@spid)
+EXEC DBA.dbo.XE_ConfigureSession @SessionName  ,@ConfType='ExpiryDate'	,@Value= 'DATEADD(mi, -1, GETDATE())'
+EXEC DBA.dbo.XE_RefreshSession @SessionName 
+*/
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>AlwaysOn Lag</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+--To run on the primary
+--
+SELECT	CAST(pr.last_commit_time - rs.last_commit_time AS TIME(3)) AS Lag,
+		ar.replica_server_name,
+		DB_NAME(rs.database_id) AS DBName,
+		ISNULL(FORMAT(rs.log_send_queue_size/1000,'##,##0'),0) AS log_send_queue_size_Mb,
+		ISNULL(FORMAT(rs.log_send_rate/1000,'##,##0'),0) AS log_send_rate_Mb,
+		rs.log_send_queue_size / (NULLIF(rs.log_send_rate, 0) * 60) AS SendDurationMn,
+		ISNULL(FORMAT(rs.redo_queue_size/1000,'##,##0'),0) AS redo_queue_size_Mb,
+		ISNULL(FORMAT(rs.redo_rate/1000,'##,##0'),0) AS redo_rate_Mb,
+		rs.redo_queue_size / (NULLIF(rs.redo_rate, 0) * 60) AS RedoDurationMn
+FROM	sys.dm_hadr_database_replica_states  AS rs 
+		INNER JOIN sys.availability_replicas ar on rs.replica_id = ar.replica_id 
+		INNER JOIN
+		(
+			-- To retrieve details for the primary replica only
+			SELECT	rs.last_commit_time, rs.group_id, rs.replica_id 
+			FROM	sys.dm_hadr_database_replica_states				 AS rs  	
+					INNER JOIN sys.dm_hadr_availability_group_states AS gs ON gs.group_id =  rs.group_id  
+					INNER JOIN sys.availability_replicas			 AS ar ON rs.replica_id = ar.replica_id
+			WHERE	ar.replica_server_name = gs.primary_replica
+		) AS pr ON rs.group_id=pr.group_id 
+WHERE	rs.is_local = 0 -- To retrieve the secondaries replicas only
+	AND	DATEDIFF(second, rs.last_commit_time, pr.last_commit_time) > 10
+ORDER BY
+		DATEDIFF(second, rs.last_commit_time, pr.last_commit_time) DESC;
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>Current_processes</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+
+
+
+SELECT 
+	DB_NAME(process.dbid) AS DbName
+	,process.dbid
+	,process.spid
+	,CASE WHEN blocker.spid IS NOT NULL THEN 'Blocked by : '+ CAST(blocker.spid AS VARCHAR)
+		WHEN blocking.spid IS NOT NULL THEN 'Blocking : '+ CAST(blocking.spid AS VARCHAR)
+	END AS Blocking
+	,ISNULL(process_cmd.text, '') AS process_cmd
+	,CAST(process.waittime/1000. AS DEC(10,2) )AS wait_secs
+	,process.lastwaittype
+	,process.cpu
+	,process.physical_io
+	,process.status
+	,process.loginame
+	,process.program_name
+	,process.memusage
+	,process.open_tran
+	,process.cmd
+	,process.hostname
+	,CAST(process.last_batch AS DATETIME2(0)) AS batch_time
+	,qp.query_plan
+FROM sys.sysprocesses AS process WITH(NOLOCK)
+LEFT JOIN sys.sysprocesses AS blocker WITH(NOLOCK) ON process.blocked != 0 AND blocker.spid = process.blocked
+LEFT JOIN sys.sysprocesses AS blocking WITH(NOLOCK) ON process.spid = blocking.blocked
+LEFT JOIN sys.dm_exec_requests AS process_request ON process.spid = process_request.session_id
+OUTER APPLY sys.dm_exec_sql_text(process.sql_handle) AS process_cmd 
+OUTER APPLY sys.dm_exec_query_plan(process_request.plan_handle) AS qp
+WHERE	process.loginame != 'LogMan'
+AND		process.cmd NOT IN (
+'TASK MANAGER'
+, 'LAZY WRITER'
+, 'BRKR TASK'
+, 'HADR_AR_MGR_NOTI'
+, 'UNKNOWN TOKEN'
+, 'SYSTEM_HEALTH_MO'
+, 'XE DISPATCHER'  
+, 'LOCK MONITOR'    
+, 'XE TIMER'  
+, 'SIGNAL HANDLER'  
+, 'BRKR EVENT HNDLR'
+, 'CHECKPOINT'     
+, 'TRACE QUEUE TASK'
+, 'sp_server_diagnostics'
+)
+AND process.lastwaittype NOT IN (
+ 'LOGMGR_QUEUE'                    
+, 'SOS_SCHEDULER_YIELD'
+, 'SLEEP_TASK'
+, 'SP_SERVER_DIAGNOSTICS_SLEEP'
+, 'BROKER_RECEIVE_WAITFOR'
+)             
+AND		(process.waittime > 1 OR process.cpu > 1000 OR process.physical_io > 10000 OR process.open_tran > 0)
+ORDER BY 
+	CASE WHEN process.dbid = db_id() THEN 0 ELSE process.dbid+1 END -- Local Db First
+	,CASE WHEN blocker.spid IS NOT NULL THEN 1
+		WHEN blocking.spid IS NOT NULL THEN 2
+		ELSE 3
+	END
+	,wait_secs desc
+
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>CurrentDB TableSizes</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+IF OBJECT_ID('tempdb..#TableSizes') IS NOT NULL DROP TABLE #TableSizes;
+SELECT	(CASE WHEN sq.type = 'SQ' THEN 'Queue' WHEN o.type = 'U' THEN 'Table' WHEN o.type = 'V' THEN 'View' END) AS ObjectType,
+		ISNULL(sqs.name, s.name) AS SchemaName,
+		ISNULL(sq.name, o.name) AS TableName,
+		(SELECT SUM(c.max_length) FROM sys.columns AS c WHERE c.object_id = o.object_id) AS LineSize,
+		(SELECT COUNT(*) FROM sys.columns AS c WHERE c.object_id = o.object_id) AS NumFields,
+		(SELECT COUNT(*) FROM sys.indexes AS i2 WHERE i2.object_id = o.object_id AND i2.index_id > 1) AS NumIndexes,
+		dp.rows AS NumRows,
+		CAST(dp.data_pages AS DECIMAL(10, 2)) / 128 AS DataMB,
+		CAST(lop.lob_pages AS DECIMAL(10, 2)) / 128 AS LOMB,
+		CAST(ip.index_pages AS DECIMAL(10, 2)) / 128 AS [IndexMB],
+		CAST(dp.data_pages + ISNULL(lop.lob_pages, 0) + ISNULL(ip.index_pages, 0) AS DECIMAL(10, 2)) / 128 AS [TotalMB],
+		(CAST(dp.data_pages + ISNULL(lop.lob_pages, 0) + ISNULL(ip.index_pages, 0) AS BIGINT) * 8192) / (CASE dp.rows WHEN 0 THEN NULL ELSE dp.rows END) AS BytePerLine
+INTO #TableSizes
+FROM	sys.schemas AS s
+		INNER JOIN sys.objects AS o ON s.schema_id = o.schema_id
+		LEFT JOIN
+		(
+			sys.internal_tables AS it
+			INNER JOIN sys.service_queues AS sq ON it.parent_object_id = sq.object_id
+			INNER JOIN sys.schemas AS sqs ON sq.schema_id = sqs.schema_id
+		) ON o.object_id = it.object_id
+		LEFT JOIN
+		(
+			SELECT	p.object_id,
+					SUM(au.total_pages) AS data_pages,
+					MAX(p.rows) AS rows
+			FROM	sys.partitions AS p
+					INNER JOIN sys.allocation_units AS au ON p.hobt_id = au.container_id
+			WHERE	p.index_id IN (0, 1)
+					AND
+					au.type <> 2
+			GROUP BY
+					p.object_id
+		) AS dp ON o.object_id = dp.object_id
+		LEFT JOIN
+		(
+			SELECT	p.object_id,
+					SUM(au.total_pages) AS index_pages
+			FROM	sys.partitions AS p
+					INNER JOIN sys.allocation_units AS au ON p.hobt_id = au.container_id
+			WHERE	p.index_id > 1
+			GROUP BY
+					p.object_id
+		) AS ip ON o.object_id = ip.object_id
+		LEFT JOIN
+		(
+			SELECT	p.object_id,
+					SUM(au.total_pages) AS lob_pages
+			FROM	sys.partitions AS p
+					INNER JOIN sys.allocation_units AS au ON p.partition_id = au.container_id
+			WHERE	au.type = 2
+			GROUP BY
+					p.object_id
+		) AS lop ON o.object_id = lop.object_id
+WHERE	o.type IN ('U', 'IT', 'V')
+		AND
+		(
+			o.type <> 'V'
+			OR
+			dp.data_pages IS NOT NULL
+		)
+
+SELECT * FROM #TableSizes
+ORDER BY TotalMb DESC
+
+EXEC DBA.dbo.Graph_FromTable '#TableSizes', NULL, 'TotalMb', 'TableName'
+
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+</CodeSnippets>
+

@@ -1,0 +1,65 @@
+<CodeSnippets  xmlns="http://schemas.microsoft.com/VisualStudio/2005/CodeSnippet">
+
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>ChangePass to 'devine'</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+Use Betclick
+GO
+
+DECLARE		@UserID INT,@Username VARCHAR(20),@Password VARCHAR(20);
+
+SET @UserID = $selected$
+SET @Username = $end$
+
+SET @Password = 'Devine12'
+SET @Password = 'devine'
+
+UPDATE	UsersPasswords
+SET		PasswordHash = CASE @Password
+				WHEN 'devine' THEN 0xD41B5ADBD7465B415D9195EFCA5D74E857CCA4789BAC3943836C19C536972B79
+				WHEN 'Devine12' THEN 0x2C781A46841742C1AD021E191CB5DCFC41D90348FC39AF3FC9694A9B70BFD8CB
+			END,
+		salt = CASE @Password
+				WHEN 'devine' THEN '9rCOW_PfcSG@MEzi3Rxg'
+				WHEN 'Devine12' THEN 'gKiQFGjgO4oSM47Xeolx'
+			END,
+		ExpirationDate = NULL
+FROM	UsersPasswords WITH(NOLOCK)
+INNER JOIN users WITH(NOLOCK) ON users.id = UsersPasswords.UserId
+WHERE	users.id = @UserID
+AND		users.pseudo = @Username
+
+UPDATE	users
+SET		statut = 3
+FROM	users WITH(NOLOCK)
+WHERE	users.id = @UserID
+AND		users.pseudo = @Username
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>If Exists Temp Table</Title></Header>
+<Snippet>
+<Declarations>
+	<Literal><ID>1</ID><Default>FIRST</Default></Literal>
+</Declarations>
+<Code Language="SQL"><![CDATA[
+IF OBJECT_ID('tempdb..#$FIRST$$selected$$end$') IS NOT NULL
+		DROP TABLE #$FIRST$; 
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+
+
+
+
+
+
+</CodeSnippets>
+

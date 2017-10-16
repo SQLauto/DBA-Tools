@@ -1,0 +1,284 @@
+<CodeSnippets  xmlns="http://schemas.microsoft.com/VisualStudio/2005/CodeSnippet">
+<CodeSnippet Format="1.0.0">
+<Header><Title>XM Batch</Title>
+<SnippetTypes>
+</SnippetTypes>
+</Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+DECLARE @Batch INT = 1000;
+WHILE @Batch = 1000
+BEGIN
+	SELECT TOP (@Batch) $selected$$end$
+	
+	SET @Batch = @@ROWCOUNT;
+	WAITFOR DELAY '00:00:01';
+END
+
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>TRANSATION SAFE</Title>
+<SnippetTypes>
+</SnippetTypes>
+</Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+BEGIN TRAN;
+DECLARE @NbResults INT = 1+1;
+SET ROWCOUNT @NbResults;
+
+$selected$$end$
+
+DECLARE @Rowcount  INT = @@ROWCOUNT;
+IF @Rowcount >= @NbResults BEGIN
+	ROLLBACK TRAN; SELECT @Rowcount AS Rollbacked;
+END
+ELSE BEGIN
+	COMMIT TRAN; SELECT @Rowcount AS Commited;
+END
+SET ROWCOUNT 0;
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>Channels</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+DECLARE @chans TABLE (ChanId INT, AppliId INT, ChannelName VARCHAR(50));
+INSERT INTO @chans VALUES
+(1,1,'WEB_BETCLIC.COM')  ,
+(2,1,'MOBILE_BETCLIC.COM'),
+(3,2,'WEB_BETCLIC.FR'),
+(4,2,'MOBILE_BETCLIC.FR'),
+(5,4,'WEB_BETCLIC.IT'),
+(6,2,'IPHONEAPP_BETCLIC.FR')  ,
+(7,1,'ANDROIDAPP_BETCLIC.COM'),
+(8,2,'ANDROIDAPP_BETCLIC.FR') ,
+(9,2,'IPADAPP_BETCLIC.FR'),
+(10,4,'MOBILE_BETCLIC.IT'),
+(11,4,'IPHONEAPP_BETCLIC.IT') ,
+(12,2,'LAUNCHERTURF_BETCLIC.FR') ,
+(13,4,'ANDROIDAPP_BETCLIC.IT'),
+(14,1,'IPHONEAPP_BETCLIC.COM'),
+(15,4,'IPADAPP_BETCLIC.IT'),
+(16,1,'IPADAPP_BETCLIC.COM')  ,
+(18,1,'UNDEFINED_BETCLIC_COM'),
+(19,2,'UNDEFINED_BETCLIC_FR') ,
+(20,4,'UNDEFINED_BETCLIC_IT') ,
+(21,16,'WEB_EVERESTPOKER.COM'),
+(22,32,'WEB_EVERESTPOKER.FR') ,
+(23,64,'WEB_EVERESTCASINO.COM'),
+(27,128,'WEB_IMPERIALCASINO.COM'),
+(30,256,'WEB_EXPEKT.COM'),
+(31,256,'MOBILE_EXPEKT.COM')  ,
+(32,256,'ANDROIDAPP_EXPEKT.COM') ,
+(33,256,'UNDEFINED_EXPEKT.COM'),
+(34,512,'WEB_MONTECARLOCASINO.COM'),
+(35,32,'IPHONEAPP_POKER_EVEREST.FR')  ,
+(36,16,'IPHONEAPP_POKER_EVEREST.COM') ,
+(37,32,'IPADAPP_POKER_EVEREST.FR'),
+(38,2,'IPHONEAPP_POKER_BETCLIC.FR'),
+(39,1,'IPHONEAPP_POKER_BETCLIC.COM')  ,
+(40,2,'IPADAPP_POKER_BETCLIC.FR'),
+(41,256,'IPHONEAPP_EXPEKT.COM'),
+(42,32,'ANDROIDAPP_POKER_EVEREST.FR') ,
+(43,16,'ANDROIDAPP_POKER_EVEREST.COM'),
+(44,256,'IPADAPP_EXPEKT.COM') ,
+(45,2,'ANDROIDAPP_POKER_BETCLIC.FR')  ,
+(46,1024,'WEB_BETCLIC.PT'),
+(47,1024,'MOBILE_BETCLIC.PT') ,
+(48,1024,'ANDROIDAPP_BETCLIC.PT'),
+(49,1024,'IPHONEAPP_BETCLIC.PT') ,
+(50,1024,'IPADAPP_BETCLIC.PT'),
+(51,1024,'UNDEFINED_BETCLIC_PT') ,
+(52,1024,'IPHONEAPP_POKER_BETCLIC.PT'),
+(53,32,'ANDROIDTABLETAPP_POKER_EVEREST.FR'),
+(54,2,'ANDROIDTABLETAPP_POKER_BETCLIC.FR') ,
+(55,512,'MOBILE_MONTECARLOCASINO.COM'),
+(56,512,'IPHONEAPP_MONTECARLOCASINO.COM')  ,
+(57,512,'ANDROIDAPP_MONTECARLOCASINO.COM') ,
+(58,64,'MOBILE_EVERESTCASINO.COM'),
+(59,64,'IPHONEAPP_EVERESTCASINO.COM') ,
+(60,64,'IPADAPP_EVERESTCASINO.COM'),
+(61,64,'ANDROIDAPP_EVERESTCASINO.COM'),
+(62,64,'ANDROIDTABLETAPP_EVERESTCASINO.COM');
+
+$end$
+LEFT JOIN @chans as chans ON ChannelId = chans.ChanId
+
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>Indus Token BCP</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+SELECT DBA.Indus.GetTokenValue('Path_BCP');
+SELECT DBA.Indus.GetTokenValue('Path_XEvents');
+SELECT DBA.Indus.GetTokenValue('_EnvironmentType');
+SELECT DBA.Indus.GetTokenValue('_StageType');
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>Decrypt</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[CONVERT(NVARCHAR(50),DECRYPTBYKEY($selected$$end$, 1, CONVERT(SYSNAME, ud.UserId, 0)), 0)]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>Format to Thousands display</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[FORMAT($selected$$end$,'##,##0')]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>replace Newlines</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+REPLACE($selected$$end$,CHAR(13)+CHAR(10),' ')
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>CMD_SHELL</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+<!-- DECLARE @strCmdShell VARCHAR(2048) = 'bcp dbname.schema.TableName out "path.dat" -T -w -S ' + @@SERVERNAME -->
+EXEC xp_cmdshell @strCmdShell
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>WaitFor Delay</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+WAITFOR DELAY '00:00:01'
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>SETUSER dev</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+SETUSER 'BE-AD\v.deoliveira'
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>DataCompression Estimate</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+
+DECLARE @TableName sysname = '$selected$'
+EXEC sp_estimate_data_compression_savings 'dbo', @TableName, NULL, NULL, 'ROW' ;  
+EXEC sp_estimate_data_compression_savings 'dbo', @TableName, NULL, NULL, 'PAGE' ;  
+
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>Agregate 10 min</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+DATEADD(mi, DATEDIFF(mi,0, GETDATE()) / 10 * 10, 0)
+ 
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>Export All TEmp TAbles</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+
+DECLARE @ExportAllTempTables NVARCHAR(max) = ''
+
+SELECT  @ExportAllTempTables+='IF OBJECT_ID(''tempdb..'+TempTables.Name
+	+''') IS NOT NULL BEGIN EXEC DBA..CSV_ExportImport_Table '''+TempTables.Name+'''; DROP TABLE '+TempTables.Name+' END '+CHAR(10)
+
+FROM ( SELECT LEFT (t.name, CHARINDEX('___', t.name)-1) AS Name
+	FROM tempdb.sys.tables T (nolock)
+	WHERE   T.name LIKE '%[_][_][_]%'
+	) AS TempTables
+
+SELECT @ExportAllTempTables
+
+EXEC sp_executesql @ExportAllTempTables
+
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>    
+<CodeSnippet Format="1.0.0">
+<Header><Title>Drop BeforeRelease Snaps</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+DECLARE @DropBeforeReleaseSnaps NVARCHAR(max) = ''
+
+SELECT  @DropBeforeReleaseSnaps+='EXEC DBA..DropSnap '+ReleaseSnaps.Name+''','''''+CHAR(10)
+FROM ( SELECT REPLACE(d.Name, '_snap', '') AS Name
+	FROM sys.databases d (nolock)
+	WHERE   d.name LIKE '%BeforeRelease%_snap'
+	AND		d.source_database_id IS NOT NULL
+	) AS ReleaseSnaps
+
+SELECT @DropBeforeReleaseSnaps
+EXEC sp_executesql @DropBeforeReleaseSnaps
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+<CodeSnippet Format="1.0.0">
+<Header><Title>Physical NAME</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+SELECT SERVERPROPERTY('ComputerNamePhysicalNetBIOS') AS ComputerName
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>FreeProcCache Recompile</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+	EXEC sp_recompile '$selected$$end$'
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+</CodeSnippets>
+

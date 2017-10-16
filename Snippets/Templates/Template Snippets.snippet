@@ -1,0 +1,294 @@
+<CodeSnippets  xmlns="http://schemas.microsoft.com/VisualStudio/2005/CodeSnippet">
+<CodeSnippet Format="1.0.0">
+<Header><Title>Script</Title></Header>
+<Snippet>
+
+<Code Language="SQL"><![CDATA[
+-----  MANDATORY INDUS BLOCK - PLEASE FILL   -----
+DECLARE @Author				VARCHAR(100)	= 'Xavier Montamat' ;
+DECLARE @AuthorTeamLeader	VARCHAR(100)	= 'Jacques Saliou' ;
+DECLARE @DBAReferrer		VARCHAR(100)	= 'Xavier Montamat' ;			
+DECLARE @DBAValidationDate	DATE			= $end$ ;			
+DECLARE @ScriptNote			VARCHAR(100)	= '' ;				
+-----  MANDATORY INDUS BLOCK - END OF BLOCK  -----
+
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>Check Script</Title></Header>
+<Snippet>
+
+<Code Language="SQL"><![CDATA[
+DECLARE	@VersionNumber		VARCHAR(50)		= '__PLEASE_DO_NOT_ENTER_ANYTHING_HERE__',
+		@DatabaseName		SYSNAME			= DB_NAME(),
+		@Author				VARCHAR(100)	= 'Xavier Montamat',
+		@CheckingPurpose	VARCHAR(100)	= '$end$',
+		@IsSuccessful		BOOLEAN			= 0,
+		@CheckingDetail		NVARCHAR(2000)	= '';
+
+
+IF EXISTS(SELECT TOP 1 * FROM ___)
+BEGIN
+	SELECT @IsSuccessful = 1;
+END
+ELSE
+BEGIN
+	SELECT ___
+	SET @CheckingDetail = @@ROWCOUNT+' errors have been found'
+END
+
+EXEC DBAWorks.Indus.ReleasedScriptsCheckings_Insert @VersionNumber, @Author, @CheckingPurpose, @IsSuccessful, @CheckingDetail, @DatabaseName;
+GO
+		
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>Stored Proc</Title></Header>
+<Snippet>
+
+<Code Language="SQL"><![CDATA[
+IF EXISTS(SELECT 1 FROM sys.procedures WHERE schema_id = SCHEMA_ID('dbo') AND name = 'myProc')
+      DROP PROCEDURE [dbo].[myProc]
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+/*
+Title : stored procedure template presenting best coding practices.
+
+Description:
+	This template is the skeleton of a typical stored procedure.
+	It's made of several parts :
+	- 1 block "If exists Drop Procedure" : delete the procedure if it already exist in the database.
+	- 1 commentary block like this one.
+	- 1 block "Create procedure" : it's the stored procedure body. It must have at least 1 "begin try - end try" / "begin catch - end catch" block.
+	- 1 block "Grant", for granting privileged execution to all concerned users.
+
+Parameters :
+	- @param1 : input parameter @param1 description 
+	- @param2 : input parameter @param2 description 
+	- @param3 : output parameter @param3 description 
+
+History:
+	2015-01-20 - NLS - Date replace Release Number in History
+	Date(YYYY-MM-DD) - Author - Description
+*/
+CREATE PROCEDURE [dbo].[myProc]
+(
+	@param1 INT,
+	@param2 INT,
+	@param3 INT OUTPUT
+)
+AS
+BEGIN TRY
+
+	/*	 
+	  STORED PROCEDURE BODY 
+	*/
+
+	RETURN 0; --Return a value if necessary...
+
+END TRY
+BEGIN CATCH
+	IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;
+	THROW;
+END CATCH
+GO
+
+-- Grant privileged execution on this stored procedure to given users
+GRANT EXECUTE ON [dbo].[myProc] TO [DatabaseUserName];
+GO
+
+		
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>Function</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+IF EXISTS(SELECT 1 FROM sys.objects WHERE schema_id = SCHEMA_ID('dbo') AND name = 'myTableFunc' AND type IN ('FN', 'TF', 'IF'))
+      DROP FUNCTION [dbo].[myTableFunc]
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+/*
+Title : Table valued function template presenting best coding practices.
+
+Description :	this template is the skeleton of a typical table valued function.
+				It's made of several parts :
+				- 1 block "If exists Drop Function" : delete the table valued function if it already exist in the database.
+				- 1 commentary block like this one.
+				- 1 block "Create function" : it's the table valued function body. It must contains a return statement.
+				- 1 block "Grant", for granting privileged execution to all concerned users.
+
+Parameters :
+				- @param1 : example parameter
+				- @param2 : example parameter
+
+Return :
+				- list here the return values meanings
+
+History :
+	2015-01-20 - NLS - Date replace Release Number in History
+	Date(YYYY-MM-DD) - Author - Description
+*/
+CREATE FUNCTION [dbo].[myTableFunc]
+(
+	  @param1 INT
+	, @param2 INT
+)
+RETURNS @Table_Variable_Name TABLE
+(
+	returned_column1_name	INT			NOT NULL
+    , returned_column2_name	VARCHAR(20)	NOT NULL
+)
+AS
+BEGIN
+
+	/*
+	 	 
+	  TABLE FUNCTION BODY : the table variable @Table_Variable_Name is filled here.
+	 	 
+	*/
+		
+	RETURN
+END 
+GO
+
+-- Grant privileged execution on this scalar function to given users
+GRANT SELECT ON [dbo].[myTableFunc] TO [DatabaseUserName]
+GO
+
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>View</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+IF EXISTS(SELECT 1 FROM sys.views WHERE schema_id = SCHEMA_ID('dbo') AND name = 'vMyView')
+      DROP VIEW [dbo].[vMyView]
+GO
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+/*
+Title : view template presenting best coding practices.
+
+Description :	this template is the skeleton of a typical view.
+				It's made of several parts :
+				- 1 block "If exists Drop view" : delete the view if it already exist in the database.
+				- 1 commentary block like this one.
+				- 1 block "Create view" : it's the view body and it contains the select statement.
+				- 1 block "Grant", for granting privileged select to all concerned users.
+
+History :
+	2015-01-20 - NLS - Date replace Release Number in History
+	Date(YYYY-MM-DD) - Author - Description
+*/
+CREATE VIEW [dbo].[vMyView]
+AS
+
+	/*	 
+	 
+	  VIEW BODY : add your SELECT statement here 	 
+	 
+	*/
+
+GO
+
+-- Grant privileged SELECT on this view to given users
+GRANT SELECT ON [dbo].[vMyView] TO [DatabaseUserName]
+GO
+
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>NewSnippet</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+BULK
+INSERT #xmtable
+FROM '\\MAL-SQLBACKUP\SLOWSAN\BCP\INST07\IN\file.csv'
+WITH
+(
+FIELDTERMINATOR = ',',
+ROWTERMINATOR = '\n'
+)
+
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+
+<CodeSnippet Format="1.0.0">
+<Header><Title>New EmailReport</Title></Header>
+<Snippet>
+<Code Language="SQL"><![CDATA[
+IF @@SERVERNAME LIKE '%INST_7'
+BEGIN
+	DECLARE @Emailtitle varchar(500) = 'Email Title - YYYYMMDD' 
+	IF NOT EXISTS (SELECT 1 FROM EmailReports WITH(NOLOCK) WHERE EmailTitle LIKE @Emailtitle )
+	BEGIN
+		INSERT INTO dbo.EmailReports 
+		(EmailTitle
+		,EmailBody
+		,EmailRecipients
+		,EmailCopyRecipients
+		,EmailExecQuery
+		,OutputFilename
+		,Frequency
+		,EmailBodyFormat
+		,CustomType
+
+		)
+		VALUES
+		(@Emailtitle
+		,'<HTML><BODY>Hi,<BR><BR>
+		Please find attached the list of ...
+		<BR>
+		If you do not need to receive this report anymore, please send us back an email and we''ll unsubscribe you.<BR>Regards,<BR>The DBA Team.<BR></BODY></HTML>'
+		,'x.montamat@betclicgroup.com'--separated by ;
+		,''
+		,'EXEC Betclick_Stats.Report.job_MailReport_'
+		,'Monthly_YYYYMMDD.csv'
+		,101 --frenquency: 1=daily, 101=monthly...
+		,'HTML'
+		,0 --report type
+		)
+	END
+	IF EXISTS (SELECT 1 FROM EmailReports WITH(NOLOCK) WHERE EmailTitle LIKE @Emailtitle )
+		SELECT 'EXEC job_EmailReports_SendReport '+ CAST((SELECT id FROM EmailReports WITH(NOLOCK) WHERE EmailTitle LIKE @Emailtitle ) AS sysname) +', ''x.montamat@betclicgroup.com'''
+END
+]]>
+</Code>
+</Snippet>
+</CodeSnippet>
+</CodeSnippets>
