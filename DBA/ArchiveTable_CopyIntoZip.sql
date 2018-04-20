@@ -31,15 +31,15 @@ Policicy override:
 GRANT EXECUTE ON [dbo].[ArchiveTable_CopyIntoZip] TO [nobody];
 
 History:
-	2017-04-14 - XMO - Fix Long durations due to empty @ranges
-	2016-11-02 - CDO - Include more date formats
+	2018-02-27 - XMO - Varchar Rangecolumn
+	2018-02-22 - XMO - Fix Range columns for BCP back to ODBC notation
+	2017-11-27 - XMO - Add @RangeEndIncluded Param 
 	2016-08-18 - MTG
 		1) fix the cast of the columns to keep length and unicode property
 		2) format the date ranges in the filename
 		3) Use special characters as column and row separators : ¤ and {§}
 		4) seperate columns names and data in 2 files inside the zip
 	2016-07-04 - XMO - Switch ranges to sql_variants
-	2016-06-28 - XMO - Fix for column names needing brackets
 	2016-06-13 - XMO - Creation
 	
 */
@@ -48,16 +48,19 @@ CREATE PROCEDURE [dbo].[ArchiveTable_CopyIntoZip]
 	@Table		sysname -->Specify 'DBName.schema.TableName' if possible
 	,@RangeColumn	sysname --> The column on which to check the range, can be a date, an id...
 	,@RangeStart	sql_variant -->inclusive can be a date, an id...
-	,@RangeEnd		sql_variant -->exclusive can be a date, an id...
+	,@RangeEnd		sql_variant -->exclusive can be a date, an id... 
 	,@Filter		VARCHAR(5000)= NULL --Optional, if only rows respecting this condition should be archived
 	,@ZipPath			VARCHAR(500) = 'default' -- Default = CAST(DBA.Indus.GetTokenValue('Path_TableArchives')  AS VARCHAR(100)))+'\'+@TableFullName+'\'
 	,@Excluded_columns	VARCHAR(200)= NULL --Optional, if some colums don't need to be archived. To save space
+	,@RangeEndIncluded BIT = 0 -- Put 1 to include RangeEnd instead of the default excluded behavior
 	,@Debug			BIT = 0
 )
 AS
 BEGIN TRY
-	DECLARE @FormatedRangeStart VARCHAR(50);
-	DECLARE @FormatedRangeEnd VARCHAR(50);
+	DECLARE @FormatedRangeStart VARCHAR(50); --For the FileName
+	DECLARE @FormatedRangeEnd VARCHAR(50);	 --For the FileName
+	DECLARE @StrRangeStart VARCHAR(100); --For the BCP cmd
+	DECLARE @StrRangeEnd VARCHAR(100);	 --For the BCP cmd
 
 	--If one of the two ranges is null, abort the whole thing. As it can mess up the query
 	IF @RangeStart IS NULL OR @RangeEnd IS NULL
@@ -66,17 +69,37 @@ BEGIN TRY
 		RETURN
 	END
 
-
-	--Format the ranges for the filename
-	IF SQL_VARIANT_PROPERTY ( @RangeStart , 'BaseType') IN ('datetime', 'datetime2', 'date')
+	--Format the ranges for the filename And BCP
+	IF SQL_VARIANT_PROPERTY ( @RangeStart , 'BaseType') IN ('datetime', 'datetime2')
 	BEGIN
-		SET @FormatedRangeStart = FORMAT(CAST(@RangeStart AS DATETIME), 'yyyyMMdd') ;
-		SET @FormatedRangeEnd = FORMAT(CAST(@RangeEnd AS DATETIME), 'yyyyMMdd') ;
+		SET @FormatedRangeStart = FORMAT(CAST(@RangeStart AS DATETIME), 'yyyyMMddTHH-mm-ss') ;
+		SET @FormatedRangeEnd = FORMAT(CAST(@RangeEnd AS DATETIME), 'yyyyMMddTHH-mm-ss') ;
+		SET @StrRangeStart	=	'{ts'''+CONVERT(varchar(100), @RangeStart, 121)+'''}'
+		SET @StrRangeEnd	=	'{ts'''+CONVERT(varchar(100), @RangeEnd, 121)+'''}'
+		--Replace plain days to have shorter names + backward compatible
+		SET @FormatedRangeStart = REPLACE(@FormatedRangeStart, 'T00-00-00', '')
+		SET @FormatedRangeEnd	= REPLACE(@FormatedRangeEnd, 'T00-00-00', '')
+	END
+	ELSE IF SQL_VARIANT_PROPERTY ( @RangeStart , 'BaseType') IN ('date') -- Probably never used. Dates are identified as datetime
+	BEGIN
+		SET @FormatedRangeStart = FORMAT(CAST(@RangeStart AS DATE), 'yyyyMMdd') ;
+		SET @FormatedRangeEnd = FORMAT(CAST(@RangeEnd AS DATE), 'yyyyMMdd') ;
+		SET @StrRangeStart	=	'{d'''+CONVERT(varchar(100), @RangeStart, 121)+'''}'
+		SET @StrRangeEnd	=	'{d'''+CONVERT(varchar(100), @RangeEnd, 121)+'''}'
+	END
+	ELSE IF SQL_VARIANT_PROPERTY ( @RangeStart , 'BaseType') IN ('char', 'varchar', 'nchar', 'nvarchar')
+	BEGIN
+		SET @FormatedRangeStart = CAST(@RangeStart AS VARCHAR(100));
+		SET @FormatedRangeEnd	= CAST(@RangeEnd AS VARCHAR(100));
+		SET @StrRangeStart	= ''''+CAST( @RangeStart AS NVARCHAR(100))+'''';
+		SET @StrRangeEnd	= ''''+CAST( @RangeEnd AS NVARCHAR(100))+'''';
 	END
 	ELSE
 	BEGIN
 		SET @FormatedRangeStart = CAST(@RangeStart AS VARCHAR);
 		SET @FormatedRangeEnd = CAST(@RangeEnd AS VARCHAR);
+		SET @StrRangeStart = CAST( @RangeStart AS VARCHAR(100))
+		SET @StrRangeEnd = CAST( @RangeEnd AS VARCHAR(100))
 	END
 
 	DECLARE @OriginalObjectName SYSNAME = @Table
@@ -159,10 +182,6 @@ BEGIN TRY
 	--Prepare the bcp of the Columns Names
 	SET @ExecSQL = 'SELECT '+ ''''+REPLACE(REPLACE(REPLACE(@ArchivedColumns, ']', ''), '[', ''), ',', ''',''')+''''
 
-	IF @debug = 1 BEGIN
-		SELECT @ExecSQL
-	END
-
 	--BCP OUT
 	SET @strCmdShell = 'BCP "'+@ExecSQL+'" queryout "'+ @ZipPath + @ColumnsFileName + '" -T -c -S ' + @@SERVERNAME;
 
@@ -182,15 +201,15 @@ BEGIN TRY
 		END
 	END
 
-	-- Prepare SELECT query of the rows to archive  (! no line return allowed for the bcp command !) 		
+	-- Prepare SELECT query of the rows to archive  (! no line return allowed for the bcp command !)  -- removed later		
 	SET @ExecSQL =
 	'SELECT ' + @ArchivedColumns
 	+' FROM '+@TableFullName+' WITH(NOLOCK)	WHERE '
-	+@RangeColumn+' >= '''+CAST(@RangeStart AS VARCHAR)+''' AND '+@RangeColumn+' < '''+CAST(@RangeEnd AS VARCHAR)+''''
+	+@RangeColumn+' >= '+@StrRangeStart+' AND '+@RangeColumn+CASE WHEN @RangeEndIncluded=1 THEN ' <= ' ELSE ' < ' END+@StrRangeEnd
 	+ISNULL(' AND '+@Filter, '')
 
 	IF @debug = 1 BEGIN
-		SELECT @ExecSQL
+		SELECT @ExecSQL AS SelectDebug
 		SET @ExecSQL = REPLACE(@ExecSQL, 'SELECT', 'SELECT TOP (99)')
 		EXEC sp_executesql @ExecSQL
 		SET @ExecSQL = REPLACE(@ExecSQL, 'SELECT TOP (99)', 'SELECT')
@@ -298,3 +317,4 @@ BEGIN CATCH
 	THROW;
 END CATCH
 GO
+

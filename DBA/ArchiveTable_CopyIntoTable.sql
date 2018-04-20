@@ -31,6 +31,7 @@ Policicy override:
 GRANT EXECUTE ON [dbo].[ArchiveTable_DeleteRows] TO [nobody];
 
 History:
+	2017-11-27 - XMO - Add @RangeEndIncluded Param 
 	2017-08-28 - XMO - Change AlwaysOn Lag no infinite wait
 	2017-04-14 - XMO - Fix Long durations due to empty @ranges
 	2017-02-28 - XMO - Add token parametered speed
@@ -44,9 +45,10 @@ CREATE PROCEDURE [dbo].[ArchiveTable_CopyIntoTable]
 	,@DestinationTable sysname -->Table where the data will be copied to. Specify 'DBName.schema.TableName' if possible
 	,@RangeColumn	sysname --> The column on which to check the range, can be a date, an id...
 	,@RangeStart	sql_variant -->inclusive can be a date, an id...
-	,@RangeEnd		sql_variant -->exclusive can be a date, an id...
+	,@RangeEnd		sql_variant -->exclusive can be a date, an id... (Dates with precision > minute can be a problem ! Due to date conversion to string)
 	,@Filter		VARCHAR(5000)= NULL --Optional, if only rows respecting this condition should be archived
 	,@Excluded_columns	VARCHAR(200)= NULL --Optional, if some colums don't need to be archived. To save space
+	,@RangeEndIncluded BIT = 0 -- Put 1 to include RangeEnd instead of the default excluded behavior
 	,@BatchSize		INT = 1000 --Number of rows to be copied in one batch. (Wait of 1 second between each batch)
 	,@Debug			BIT = 0 -- no real write action, just displays the execs
 )
@@ -184,7 +186,7 @@ BEGIN TRY
 			SELECT TOP(@Batch) WITH TIES ' + @ArchivedColumns
 			+'
 			FROM '+@TableFullName+' WITH(NOLOCK)
-			WHERE '+QUOTENAME(@RangeColumn)+' >= @RangeStart AND '+QUOTENAME(@RangeColumn)+' < @RangeEnd 
+			WHERE '+QUOTENAME(@RangeColumn)+' >= @RangeStart AND '+QUOTENAME(@RangeColumn)+CASE WHEN @RangeEndIncluded=1 THEN ' <= ' ELSE ' < ' END+' @RangeEnd 
 			AND (@LastInsertedLine IS NULL OR '+QUOTENAME(@RangeColumn)+' > @LastInsertedLine )'
 			+ISNULL(' AND '+@Filter, '')+'
 			ORDER BY '+@RangeColumn+' ASC

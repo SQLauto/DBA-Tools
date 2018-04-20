@@ -27,12 +27,15 @@ Parameters :
 	-- @cross_order		: This is the defining ordering column if we want to have non agregate & non grouped columns which are still appearing in destination table
 	-- @minutes_interval : This is the interval of time for which to agregate our logs
 	-- @DeleteOlderThan : A VARCHAR value which has to be castable as a datetime2. All logs stricly older than the date specified will be deleted from the nonAgregated Table
+	-- @Divider : If filled, it supposes a divider has been applied to the XEvent session, meaning it captured 1 out of x events. We can multiply back the stats to this number to get accurate stats
 	-- @debug : if set to 1, will deactivate all writing actions like insert/delete
 
 Debug :
 exec [dbo].[XE_LogsToStatsMinutes] 'temp.XELogs_Rpc', 'temp.XEStats10min_Rpc', @cross_order = 'duration DESC', @minutes_interval = 10, @debug = 1
 
 History:
+	2018-03-02 - XMO - Special short statement rule
+	2018-01-29 - XMO - Add Divider DataType management
 	2017-07-04 - XMO - Delay import by 1 minute to allow for late dispatch latency
 	2016-12-07 - XMO - nb_secs column modified for post agregate
 	2016-11-22 - XMO - Added nb_secs column
@@ -52,6 +55,7 @@ CREATE PROCEDURE [dbo].[XE_LogsToStatsMinutes]
 	,@StatsTable sysname = NULL
 	,@cross_order sysname = 'default'
 	,@minutes_interval varchar(6) = NULL
+	,@Divider VARCHAR(5) = NULL
 	,@DeleteOlderThan VARCHAR(256) = NULL
 	,@debug BIT = 0
 )
@@ -61,17 +65,19 @@ BEGIN TRY
 -- To Agregate Stats for ALL the sessions found in the table XESessionsData, don't use any @LogsTable or @StatsTable
 -- This will recursively call the present proc for each session found
 IF (@LogsTable IS NULL AND  @StatsTable IS NULL) BEGIN
-	DECLARE @ImportSessions TABLE (ImportTable VARCHAR (128), StatsTable VARCHAR (128), DeleteOlderThan VARCHAR(256))
+	DECLARE @ImportSessions TABLE (ImportTable VARCHAR (128), StatsTable VARCHAR (128), DeleteOlderThan VARCHAR(256), Divider VARCHAR(5))
 	DECLARE @ImportTable VARCHAR (128)
 	-- (ImportTable as the same signification here as LogsTable)
 
-	INSERT INTO @ImportSessions(ImportTable, StatsTable, DeleteOlderThan)
+	INSERT INTO @ImportSessions(ImportTable, StatsTable, DeleteOlderThan, Divider)
 	SELECT DISTINCT ImportTable.Value
 		, StatsTable.Value
 		, CASE WHEN DeleteOlderThan.DataType IS NULL THEN @DeleteOlderThan ELSE DeleteOlderThan.Value END AS DeleteOlderThan
+		, ISNULL(Divider.Value, '1') AS Divider 
 	FROM XESessionsData AS ImportTable WITH(NOLOCK)
 	LEFT JOIN XESessionsData AS StatsTable WITH(NOLOCK) ON ImportTable.SessionName = StatsTable.SessionName AND StatsTable.DataType = 'StatsTable' 
 	LEFT JOIN XESessionsData AS DeleteOlderThan WITH(NOLOCK) ON ImportTable.SessionName = DeleteOlderThan.SessionName AND DeleteOlderThan.DataType = 'DeleteOlderThan'
+	LEFT JOIN XESessionsData AS Divider WITH(NOLOCK) ON ImportTable.SessionName = Divider.SessionName AND Divider.DataType = 'Divider' 
 	WHERE ImportTable.DataType = 'ImportTable'
 	AND (StatsTable.value IS NOT NULL
 		OR
@@ -82,7 +88,7 @@ IF (@LogsTable IS NULL AND  @StatsTable IS NULL) BEGIN
 		SELECT * FROM @ImportSessions
 
 	WHILE EXISTS(SELECT 1 FROM @ImportSessions) BEGIN
-		SELECT TOP (1) @ImportTable = ImportTable, @StatsTable = StatsTable, @DeleteOlderThan = DeleteOlderThan
+		SELECT TOP (1) @ImportTable = ImportTable, @StatsTable = StatsTable, @DeleteOlderThan = DeleteOlderThan, @Divider = Divider
 		FROM @ImportSessions 
 		-- Recursive call for each session found
 		EXEC XE_LogsToStatsMinutes @LogsTable = @ImportTable
@@ -90,6 +96,7 @@ IF (@LogsTable IS NULL AND  @StatsTable IS NULL) BEGIN
 		, @cross_order = @cross_order
 		, @minutes_interval = @minutes_interval
 		, @DeleteOlderThan = @DeleteOlderThan
+		, @Divider = @Divider
 		, @debug = @debug
 
 		DELETE @ImportSessions WHERE ImportTable = @ImportTable and ISNULL(StatsTable, 'NoStats') = ISNULL(@StatsTable, 'NoStats')
@@ -141,6 +148,16 @@ ELSE IF(@LogsTable IS NOT NULL ) BEGIN
 		IF @Debug = 1
 			SELECT * FROM #StatsTableColumns WITH(NOLOCK);
 
+		--Fill Divider if null but needed, Only used for manual call to this function
+		IF @Divider IS NULL BEGIN
+			IF EXISTS (SELECT 1 FROM #StatsTableColumns WHERE column_name = 'multiplier') BEGIN
+				IF Object_id('XESessionsData') IS NOT NULL BEGIN
+					SELECT TOP 1 @Divider = Value FROM XESessionsData WHERE DataType = 'Divider' 
+					AND SessionName = (SELECT TOP 1 SessionName FROM XESessionsData WHERE DataType = 'StatsTable' AND Value =@StatsTable) 
+					SET @Divider = ISNULL(@Divider,1)
+				END
+			END
+		END
 		IF @Cross_order = 'default' BEGIN
 			IF EXISTS ( SELECT 1 FROM #StatsTableColumns WHERE is_nullable = 0 AND had_equivalent = 1) --> at least one cross order condition
 				AND EXISTS  ( SELECT 1 FROM #StatsTableColumns WHERE is_nullable = 1 AND had_equivalent = 1 --> at least one cross order target (like a varchar nullable)
@@ -226,6 +243,7 @@ ELSE IF(@LogsTable IS NOT NULL ) BEGIN
 				CONTINUE
 
 			--Special column to calculate number of distinct seconds for sessions only running for short amounts of time
+			--Note : => To be removed once not used in production tables. Replaced by Divider / Multiplier option
 			IF @column_name='nb_secs'
 			BEGIN
 				--Get the number of seconds per group
@@ -240,6 +258,25 @@ ELSE IF(@LogsTable IS NOT NULL ) BEGIN
 			,'
 				--Only keep the largest numer
 				SET @query_stats_suffix_sel += 'MAX(nb_secs) OVER(PARTITION BY timestamp) AS nb_secs'+'
+			,'
+				CONTINUE
+			END		
+
+			--Special Column, used if the initial session had a filter which kept only 1 event out of every X events. Insert that divider to multiply back as real stats
+			IF @column_name='multiplier'
+			BEGIN
+				--Get the number of seconds per group
+				IF  @had_equivalent = 0
+					SET @query_stats_CTE +=@Divider+' AS multiplier'+'
+					,'
+				ELSE IF @had_equivalent = 1
+					SET @query_stats_CTE +='AVG(multiplier) AS multiplier'+'
+					,'
+
+				SET @query_stats_insert += @column_name+'
+			,'
+				--Only keep the largest numer
+				SET @query_stats_suffix_sel += 'multiplier'+'
 			,'
 				CONTINUE
 			END		
@@ -261,14 +298,25 @@ ELSE IF(@LogsTable IS NOT NULL ) BEGIN
 				,'
 				SET @query_stats_CTE_groupby+=@str_agregate_timestamp+'
 				,'
+				CONTINUE
 			END
 			-- If it's a count, we count, unless a count column already existed, then it's a sum(count) done later
 			ELSE IF @column_name = 'count' AND @had_equivalent = 0
+			BEGIN
 				SET @query_stats_CTE +='COUNT(*) AS count'+'
 				,'
+				CONTINUE
+			END
+			--If the column is 'statement' but with a non max value, it is replaced by the following which susbtrings the result(left)
+			ELSE IF @column_name = 'statement' AND @column_type NOT LIKE ('%VARCHAR(MAX)') BEGIN 						
+				DECLARE @statement_max_length VARCHAR(5) = replace(replace(replace(@column_type, 'varchar(', ''),')', ''), 'n', '')-1
+				SET @query_stats_cross_sel+='LEFT(statement, '+@statement_max_length+') AS statement
+				,'
+				CONTINUE
+			END
 
 			--If the column is not nullable, then we suppose it's a GROUP BY column
-			ELSE IF @is_nullable = 0 AND @column_name!='timestamp'
+			IF @is_nullable = 0 AND @column_name!='timestamp'
 			BEGIN
 				SET @query_stats_CTE +=@column_name+'
 				,'
@@ -277,6 +325,7 @@ ELSE IF(@LogsTable IS NOT NULL ) BEGIN
 				SET @query_stats_cross_where+='
 				AND stats_a.'+@column_name+' = L.'+@column_name+'
 				'
+				CONTINUE
 			END
 
 			--If the column is of type INT, BIGINT... the sum is calculated by default, or the _min, _max, depending on the suffix (_avg if calculated is ignored above)
@@ -290,13 +339,13 @@ ELSE IF(@LogsTable IS NOT NULL ) BEGIN
 				ELSE IF @column_name LIKE '%_min'
 					SET @query_stats_CTE +='MIN('+@previous_column_match+') AS '+@column_name+'
 					,'
-				ELSE IF @column_name LIKE '%_avg'
+				ELSE IF @column_name LIKE '%_avg' AND  @column_type NOT LIKE 'DATE%'
 					SET @query_stats_CTE +='AVG('+@previous_column_match+') AS '+@column_name+'
 					,'
-				ELSE IF @column_name LIKE '%_sum' OR @had_equivalent = 1 -- A SUM is done by default
+				ELSE IF (@column_name LIKE '%_sum' OR @had_equivalent = 1) AND  @column_type NOT LIKE 'DATE%' -- A SUM is done by default 
 					SET @query_stats_CTE +='SUM(CAST('+@previous_column_match+' AS '+@column_type+')) AS '+@column_name+'
 					,'
-				
+				CONTINUE
 			END
 
 			--If the column is a varchar type but is nullable, we suppose it's not meant to be grouped by so it's added to the cross apply select

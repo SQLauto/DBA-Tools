@@ -28,6 +28,7 @@ Policicy override:
 GRANT EXECUTE ON [dbo].[CloneUser] TO [nobody];
 
 History:
+	2018-03-08 - XMO - Add @ExecClonage param and email to forward
 	2017-03-30 - XMO - Add Check_policy as supported login param
 	2017-03-28 - XMO - Creation
 */
@@ -39,6 +40,7 @@ CREATE PROCEDURE [dbo].[CloneUser]
 	,@NewUserPwd NVARCHAR(100) = '' --Needed if you want to create a login with this
 	,@NewUserLogin SYSNAME = NULL -- Default is same AS @NewUserName
 	,@NewUserLoginSID VARBINARY(85) = NULL -- Default is a new random one
+	,@ExecClonage BIT = 0 --> default = display clone query to exec ; 1 = Exec the query directly
 	,@Debug BIT = 0
 	
 )
@@ -50,7 +52,7 @@ IF @NewUserLogin IS NULL
 --Multi Db
 IF (@DbName = '%')
 BEGIN
-	DECLARE @EachDbCommand nvarchar(2000) 
+	DECLARE @EachDbCommand NVARCHAR(max) 
 	
 	IF @NewUserLoginSID IS NULL --Generate new random global SID for the user
 		SELECT @NewUserLoginSID = cast(newId() as varbinary(85)) 
@@ -69,12 +71,12 @@ BEGIN
 				+', DEFAULT_LANGUAGE='+QUOTENAME(cloned.default_language_name)
 				+', CHECK_POLICY='+CASE WHEN cloned.is_policy_checked = 1 THEN 'ON' ELSE 'OFF' END
 				+CASE WHEN cloned.is_expiration_checked =1 THEN ', CHECK_EXPIRATION=ON ' ELSE '' END
-				+';'+CHAR(10)+'GO'+CHAR(10)
+				+';'+CHAR(10)
 			ELSE ''
 		END
 		+CASE 	--Disable login if cloned disabled
 			WHEN cloned.is_disabled = 1 AND ISNULL(new.is_disabled, 0) != 1 THEN
-			 'ALTER LOGIN '+QUOTENAME(@NewUserLogin)+' DISABLE '+CHAR(10)+'GO'+CHAR(10)
+			 'ALTER LOGIN '+QUOTENAME(@NewUserLogin)+' DISABLE '+CHAR(10)
 			 ELSE ''
 		END 
 	FROM sys.sql_logins AS cloned
@@ -84,7 +86,7 @@ BEGIN
 	
 
 	SELECT @EachDbCommand = '
-		EXEC DBA..CloneUser ''?'' , '''+@ClonedUser+''', '''+@NewUserName+''', '''+@NewUserLogin+'''
+		EXEC DBA..CloneUser ''?'' , '''+@ClonedUser+''', '''+@NewUserName+''', '''+@NewUserLogin+''', @ExecClonage = 0, @Debug = 0 --Leave these at 0 AS they will be executed on upper level
 	' 
 	INSERT INTO #AllDBsPermissions
 	EXEC sp_MSforeachdb @EachDbCommand
@@ -92,8 +94,48 @@ BEGIN
 	SET @EachDbCommand = '' --reset and reuse this variable
 	SELECT @EachDbCommand += stmt FROM #AllDBsPermissions
 	SELECT @@SERVERNAME AS INST , @EachDbCommand AS SQL_to_Exec
+	IF @ExecClonage = 1 AND @Debug = 0 AND @EachDbCommand != '' BEGIN 
+		EXEC sp_executesql @EachDbCommand
+		SELECT 'Executed' AS EachDbCommand
+	END 
 
 
+	--Send Email to self to then transfer to user
+	If ( @@servicename LIKE '%INST_7' 
+		AND (system_user  LIKE 'BE-AD%' OR system_user LIKE 'BETCLIC%')
+		AND @EachDbCommand != '')
+	BEGIN
+		DECLARE @EmailRecipient sysname=
+		CASE WHEN system_user like 'BE-AD%'
+				THEN substring(system_user, CHARINDEX( '\', system_user )+1, 99)
+				+'@betclicgroup.com'
+			WHEN system_user like 'BETCLIC%'
+				THEN substring(system_user, CHARINDEX( '\', system_user )+1, 1)
+				+ '.'
+				+ substring(system_user, CHARINDEX( '\', system_user )+2, 99)
+				+'@betclicgroup.com'
+		END
+		SELECT 'Sending email to '+@EmailRecipient+'. Forward to the user.' AS Email
+		DECLARE @EmailBody VARCHAR(4000) = 
+			
+'Hello,
+Your personnal SQL login credentials have been created for production environnement.
+Username : '+@NewUserName+'
+Password : '+@NewUserPwd+'
+
+Please do not share these.
+
+Regards,
+DBA team
+'
+		--Send the email
+		EXEC msdb.dbo.sp_send_dbmail --VIP report not to be moved to email reports
+			@profile_name = 'DBATEAM_Reports',
+			@recipients = @EmailRecipient,
+			@copy_recipients = '',
+			@subject = 'SQL Login Prod Access' ,
+			@body = @EmailBody
+	END --end of Send the email
 END
 ELSE
 --Single Db
@@ -108,6 +150,8 @@ ELSE
 	DECLARE @ClonedUser sysname = '''+@ClonedUser+'''
 		, @NewUserName sysname = '''+@NewUserName+'''
 		, @NewUserLogin sysname = '''+@NewUserLogin+'''
+		, @ExecClonage BIT = '+CAST(@ExecClonage AS NCHAR(1))+'
+		, @SQLCloneUser NVARCHAR(2000)
 
 	--Check if old user exists on this DB
 	IF EXISTS (SELECT 1 FROM sys.database_principals WHERE name = @ClonedUser)
@@ -150,7 +194,12 @@ ELSE
 
 		IF @CloneUserStmt != ''''
 		BEGIN		
-			SELECT ''--''+@@SERVERNAME+ '' ( ''+DB_NAME()+'' )''+CHAR(10)+''USE ''+DB_NAME()+CHAR(10)+@CloneUserStmt+''GO''+CHAR(10)
+			SELECT @SQLCloneUser = ''--''+@@SERVERNAME+ '' ( ''+DB_NAME()+'' )''+CHAR(10)+''USE ''+DB_NAME()+CHAR(10)+@CloneUserStmt+CHAR(10)
+			SELECT @SQLCloneUser
+			IF @ExecClonage = 1 BEGIN 
+				EXEC sp_executesql @SQLCloneUser
+				SELECT ''Executed'' AS SQLCloneUser
+			END 
 		END
 	
 	END

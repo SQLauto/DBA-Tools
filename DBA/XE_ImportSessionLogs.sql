@@ -40,6 +40,8 @@ exec dbo.XE_ImportSessionLogs 'Session_Betclick_RPCs', 'Table_XELogs_Rpc', 1, @d
 exec XE_ImportSessionLogs 'ALL', @debug = 1
 
 History:
+	2018-01-29 - XMO - Removed EmptyFileSize not usefull since FileOffset.
+	2017-12-01 - XMO - More verbose error
 	2017-07-03 - XMO - Use FileOffset using XELogFilesImport table
 	2017-03-08 - XMO - Fix event fields xml parsing
 	2016-12-06 - XMO - Added EmptyFileSize auto param
@@ -60,7 +62,6 @@ CREATE PROCEDURE [dbo].[XE_ImportSessionLogs]
 	,@DestinationTable sysname  = NULL
 	,@MaxLogFilesToImport INT = 25
 	,@ForceFilePath VARCHAR(512) = NULL
-	,@EmptyFileSize VARCHAR(7) = NULL
 	,@ERROR_output NVARCHAR(4000) = '' OUTPUT
 	,@debug BIT = 0
 )
@@ -69,17 +70,15 @@ BEGIN TRY
 	-- To import All the sessions found in the Table SessionNamesData, use the @SessionName : ALL
 	-- This will recursively call XE_ImportSessionLogs proc for each session found
 	IF (@SessionName IS NULL AND @DestinationTable IS NULL )BEGIN
-		DECLARE @ImportSessions TABLE (SessionName VARCHAR (128), ImportTable VARCHAR (128), CustomPath VARCHAR (512), EmptyFileSize VARCHAR(7))
+		DECLARE @ImportSessions TABLE (SessionName VARCHAR (128), ImportTable VARCHAR (128), CustomPath VARCHAR (512))
 		DECLARE @ImportTable VARCHAR (128), @CustomPath VARCHAR (512)
 
-		INSERT INTO @ImportSessions(SessionName, ImportTable, CustomPath, EmptyFileSize)
+		INSERT INTO @ImportSessions(SessionName, ImportTable, CustomPath)
 		SELECT ImportTable.SessionName
 			, ImportTable.Value
 			, CustomPath.Value
-			, EmptyFileSize.Value
 		FROM XESessionsData AS ImportTable WITH(NOLOCK)
 		LEFT JOIN XESessionsData AS CustomPath WITH(NOLOCK) ON ImportTable.SessionName = CustomPath.SessionName AND CustomPath.DataType = 'CustomPath' 
-		LEFT JOIN XESessionsData AS EmptyFileSize WITH(NOLOCK) ON ImportTable.SessionName = EmptyFileSize.SessionName AND EmptyFileSize.DataType = 'EmptyFileSize' 
 		WHERE	ImportTable.DataType = 'ImportTable'
 		AND		ImportTable.Value IS NOT NULL
 
@@ -87,7 +86,7 @@ BEGIN TRY
 			SELECT * FROM @ImportSessions
 
 		WHILE EXISTS(SELECT 1 FROM @ImportSessions) BEGIN
-			SELECT TOP (1) @SessionName = SessionName, @ImportTable = ImportTable, @CustomPath = CustomPath, @EmptyFileSize = EmptyFileSize
+			SELECT TOP (1) @SessionName = SessionName, @ImportTable = ImportTable, @CustomPath = CustomPath
 			FROM @ImportSessions 
 			DECLARE @LastErrorOutput NVARCHAR(4000) = ''
 			-- Recursive call for each session found
@@ -95,7 +94,6 @@ BEGIN TRY
 			, @DestinationTable = @ImportTable
 			, @MaxLogFilesToImport = @MaxLogFilesToImport
 			, @ForceFilePath = @CustomPath
-			, @EmptyFileSize = @EmptyFileSize
 			, @ERROR_output = @LastErrorOutput OUTPUT
 			, @debug = @debug
 
@@ -189,21 +187,6 @@ BEGIN TRY
 		OR result_line NOT LIKE '%.xel'
 		-- if result_line LIKE '% 0 %' means files being written
 
-		-- Delete all supposed empty files directly to optimize speed. 
-		-- Note : There should be a lot less of those since the switch to FileOffset method. Could be removed to reduce complexity.
-		WHILE EXISTS (SELECT TOP 1 1 FROM @EventFilesToImport WHERE file_size = @EmptyFileSize)
-		BEGIN
-			DECLARE @line_empty_to_delete AS VARCHAR(200) = (SELECT TOP 1 file_name FROM @EventFilesToImport WHERE file_size = @EmptyFileSize ORDER BY result_line);
-			
-			SET @strCmdShell='del ' + @Target_DirPath+'\'+@line_empty_to_delete
-				
-			IF @Debug = 0
-				EXEC xp_cmdshell @strCmdShell, no_output
-			ELSE
-				SELECT @EmptyFileSize AS EmptyFileConf, @line_empty_to_delete AS EmptyFileFound,  @strCmdShell AS DeleteCmd
-
-			DELETE FROM @EventFilesToImport WHERE file_name = @line_empty_to_delete
-		END
 
 		--Don't import files if their number is above @MaxLogFilesToImport
 		DELETE @EventFilesToImport WHERE ID NOT IN( SELECT TOP (@MaxLogFilesToImport) ID FROM @EventFilesToImport )
@@ -248,16 +231,6 @@ BEGIN TRY
 				SELECT TOP 1 event_data_XML FROM #File_DATA_XML
 			END
 
-			--check if the file is empty
-			IF NOT EXISTS (SELECT 1 FROM #File_DATA_XML)
-			BEGIN
-				IF ISNULL(@FileBeingWritten, 0) = 0 AND @LogFileStartOffset IS NULL AND @LogFileStartOffset IS NULL
-				BEGIN
-					--Empty file not removed previously by @EmptyFileSize check. Updating @EmptyFileSize value accordingly
-					DECLARE @NewEmptyFileSizeConf VARCHAR(7) = (SELECT TOP 1 file_size FROM @EventFilesToImport WHERE file_name = @EventFileToImport)
-					EXEC XE_ConfigureSession @SessionName, 'EmptyFileSize', @NewEmptyFileSizeConf, @Action ='Replace'
-				END
-			END
 			--Create the Import Query from the temp table above to the store table based on the destination table structure
 			ELSE
 			BEGIN
@@ -431,16 +404,18 @@ BEGIN TRY
 
 			--First Error found, log it and go to next file
 			IF ISNULL(@ERROR_output, '') = ''
-				SET @ERROR_output = ERROR_MESSAGE()	
+				SET @ERROR_output = 'Error on fileImport '+@EventFileToImport_FullPath+'. '+ERROR_MESSAGE()	
 			ELSE -- Second Error, log it and exit loop
 			BEGIN
-				SET @ERROR_output +=(CHAR(10))+ERROR_MESSAGE();
+				SET @ERROR_output +=(CHAR(10))+'Error on fileImport '+@EventFileToImport_FullPath+'. '+ERROR_MESSAGE();
 				BREAK;
 			END
 				
 		END CATCH
 
 	END --End single session IF
+	ELSE
+		SELECT '@SessionName IS NULL OR @DestinationTable IS NULL' AS ABORT
 
 	--Throw Error if any, (but only on the last nestlevel)
 	IF @@NESTLEVEL < 2 AND ISNULL(@ERROR_output,'') != ''

@@ -14,15 +14,20 @@ Description:
 Use it without parameters to get some interactive help
 
 Possible ConfTypes :
-('ExpiryDate', 'Event_Type', 'Event_Fields', 'Global_Fields', 'Filter', 'ImportTable', 'StatsTable', 'CustomPath', 'DeleteOlderThan', 'MaxDispatchLatency', 'EmptyFileSize')
+('ExpiryDate', 'Event_Type', 'Event_Fields', 'Global_Fields', 'Filter', 'ImportTable', 'StatsTable', 'CustomPath', 'DeleteOlderThan', 'MaxDispatchLatency', 'Divider')
 	
 Possible Actions :
 	-[Force]Add
 	-[Force]Replace
 	-[Force]Remove
+	
+GRANT EXECUTE ON [dbo].[XE_ConfigureSession] TO [public];
 
 exec dbo.XE_ConfigureSession @SessionName = @SessionName, @ConfType = @ConfType, @Value = @Value, @ExpiryDate= @ExpiryDate, @Action = @Action, @Debug = @Debug
 History:
+	2018-03-14 - XMO - Add Multi EventTypes management
+	2018-02-28 - XMO - Removed Default Expirydate to avoid errors
+	2018-01-29 - XMO - Removed EmptyFileSize. Add Divider
 	2016-11-21 - XMO - Added EmptyFileSize conf
 	2016-11-21 - XMO - Added MaxDispatchLatency conf
 	2016-05-26 - XMO - Corrected some mistakes
@@ -39,22 +44,12 @@ CREATE PROCEDURE [dbo].[XE_ConfigureSession]
 	@SessionName VARCHAR(128) = NULL
 	,@ConfType VARCHAR(128) = NULL
 	,@Value VARCHAR(MAX) = NULL
-	,@ExpiryDate DATETIME2(0) = {d'1900-01-01'}
+	,@ExpiryDate DATETIME2(0) = NULL
 	,@Action VARCHAR(128) = 'Add'
 	,@Debug BIT = 0
 )
 AS
 BEGIN TRY
-
-	--Set Default ExpiryDate
-	IF @ExpiryDate = {d'1900-01-01'} BEGIN
-		IF EXISTS(SELECT 1 FROM XeSessionsData WHERE SessionName = @SessionName)
-			SELECT TOP 1 @ExpiryDate = ExpiryDate FROM XeSessionsData WHERE SessionName = @SessionName
-		ELSE 
-			SET @ExpiryDate = DATEADD(day, 30, GETDATE())
-	END
-
-
 	--Replace possible actions synonyms
 	SET @Action = REPLACE(@Action, 'Delete', 'Remove')
 	SET @Action = REPLACE(@Action, 'Update', 'Replace')
@@ -110,9 +105,9 @@ BEGIN TRY
 
 		--IF Tables not configured, try to find existing ones that could match
 		IF @StatsTableName IS NULL
-			SET @StatsTableName = 'temp.'+(SELECT TOP 1 name FROM sys.tables WHERE schema_id = SCHEMA_ID('temp') AND name LIKE 'XEStats%_'+@SessionName) 
+			SET @StatsTableName = 'temp.'+(SELECT TOP 1 name FROM sys.tables WITH(NOLOCK) WHERE schema_id = SCHEMA_ID('temp') AND name LIKE 'XEStats%_'+@SessionName) 
 		IF @ImportTableName IS NULL
-			SET @ImportTableName= 'temp.'+(SELECT TOP 1 name  FROM sys.tables WHERE schema_id = SCHEMA_ID('temp') AND name = 'XELogs_'+@SessionName) 
+			SET @ImportTableName= 'temp.'+(SELECT TOP 1 name  FROM sys.tables WITH(NOLOCK) WHERE schema_id = SCHEMA_ID('temp') AND name = 'XELogs_'+@SessionName) 
 
 
 		--IF the session exists on the server
@@ -204,7 +199,7 @@ BEGIN TRY
 			AS [SUCCESS																	]
 	END
 	--Specific Conf ADD/UPDATE/DELETE Management
-	ELSE IF @ConfType IN('Event_Type', 'Event_Fields', 'Global_Fields', 'Filter', 'ImportTable', 'StatsTable', 'CustomPath', 'DeleteOlderThan', 'MaxDispatchLatency', 'EmptyFileSize')
+	ELSE IF @ConfType IN('Event_Type', 'Event_Fields', 'Global_Fields', 'Filter', 'ImportTable', 'StatsTable', 'CustomPath', 'DeleteOlderThan', 'MaxDispatchLatency', 'Divider')
 	BEGIN
 		IF @ConfType IN( 'Global_Fields' , 'Event_Fields' )	AND @Action != 'Remove' BEGIN
 			IF @Action = 'Add'
@@ -258,7 +253,7 @@ BEGIN TRY
 					DECLARE @DbName		sysname	= reverse(LEFT(@ReverseString, charindex('.',@ReverseString) -1))
 
 
-				IF NOT EXISTS (SELECT 1 FROM sys.tables 
+				IF NOT EXISTS (SELECT 1 FROM sys.tables WITH(NOLOCK)
 								WHERE schema_id = SCHEMA_ID(case @SchemaName WHEN '' THEN 'dbo' ELSE @SchemaName END) 
 								AND name = @TableName) 
 					AND @Action NOT LIKE 'Force%'
@@ -274,7 +269,7 @@ BEGIN TRY
 					SELECT 'Can''t set NULL value for this conf' AS [ABORT								]
 					RETURN
 				END
-				IF @ConfAlreadyExists = 0 OR (@ConfType= 'Filter' AND @ConfAlreadyExists = 1 AND @ValueAlreadyExists = 0)
+				IF @ConfAlreadyExists = 0 OR (@ConfType IN('Event_Type', 'Filter') AND @ConfAlreadyExists = 1 AND @ValueAlreadyExists = 0)
 				BEGIN
 					INSERT INTO XESessionsData (SessionName,DataType,Value,ExpiryDate)
 					VALUES (@SessionName, @ConfType, @Value, @ExpiryDate)
@@ -298,7 +293,7 @@ BEGIN TRY
 					RETURN
 				END
 				-- @ConfAlreadyExists can't be at 0 AS it would match previous case
-				IF @ConfType = 'Filter' BEGIN
+				IF @ConfType IN( 'Filter', 'Event_Type')  BEGIN
 					EXEC dbo.XE_ConfigureSession @SessionName = @SessionName, @ConfType = @ConfType, @Value = NULL  , @ExpiryDate= @ExpiryDate, @Action = 'Remove', @Debug = @Debug
 					EXEC dbo.XE_ConfigureSession @SessionName = @SessionName, @ConfType = @ConfType, @Value = @Value, @ExpiryDate= @ExpiryDate, @Action = 'Add', @Debug = @Debug
 				END
@@ -342,7 +337,3 @@ BEGIN CATCH
 	THROW;
 END CATCH
 GO
-
-GRANT EXECUTE ON [dbo].[XE_ConfigureSession] TO [public];
-GO
-
